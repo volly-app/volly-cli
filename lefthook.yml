@@ -1,0 +1,18 @@
+# Git hooks (installed via the package.json `prepare` script).
+# Pre-commit formats exactly what's staged and restages it; pre-push runs the
+# linter and a format check so nothing unlintable leaves the machine.
+pre-commit:
+  jobs:
+    - name: format staged files
+      glob: "*.{ts,mts,cts,js,mjs,cjs,json}"
+      run: npx oxfmt {staged_files}
+      stage_fixed: true
+
+pre-push:
+  jobs:
+    # Repo-wide checks. Lefthook skips pre-push jobs when the push carries no
+    # files at all (e.g. tag-only pushes) — any commit push runs them.
+    - name: lint
+      run: npm run lint
+    - name: format check
+      run: npm run fmt:check

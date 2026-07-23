@@ -1,0 +1,40 @@
+name: Action self-test
+
+# Manual only: deploys a fixture through the composite action against staging.
+# Needs the VOLLY_STAGING_TOKEN secret (a PAT minted on app.volly.tools).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the local CLI (test the action against this checkout)
+        run: |
+          npm ci
+          npm run build
+      - name: Write a fixture site
+        run: |
+          mkdir -p fixture
+          echo "<h1>volly-cli action self-test $GITHUB_RUN_ID</h1>" > fixture/index.html
+      - name: Deploy through the action
+        id: deploy
+        uses: ./
+        env:
+          VOLLY_CLI_BIN: node ${{ github.workspace }}/dist/bin.js
+        with:
+          token: ${{ secrets.VOLLY_STAGING_TOKEN }}
+          api-url: https://app.volly.tools
+          path: fixture
+          app: cli-action-self-test
+          message: "action self-test run ${{ github.run_id }}"
+      - name: Check outputs
+        run: |
+          echo "url:           ${{ steps.deploy.outputs.url }}"
+          echo "deployment-id: ${{ steps.deploy.outputs.deployment-id }}"
+          test -n "${{ steps.deploy.outputs.url }}"
+          test -n "${{ steps.deploy.outputs.deployment-id }}"

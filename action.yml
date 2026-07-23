@@ -1,0 +1,103 @@
+name: Deploy to Volly
+description: >-
+  Deploy a static site to Volly. Wraps the @volly-app/cli npm package:
+  packs a directory (or single file), creates the app if needed, and
+  publishes it — or stages a draft build for review.
+author: volly-app
+branding:
+  icon: upload-cloud
+  color: purple
+
+inputs:
+  token:
+    description: >-
+      Volly personal access token (mint one with `volly token create`);
+      store it as a repository secret.
+    required: true
+  path:
+    description: Directory or file to deploy (directory needs a root index.html).
+    required: false
+    default: "."
+  app:
+    description: Target app slug. Optional when the path carries a volly.json.
+    required: false
+    default: ""
+  draft:
+    description: Save as a private draft instead of publishing live ("true"/"false").
+    required: false
+    default: "false"
+  message:
+    description: Release notes for this deploy (shown in the project timeline).
+    required: false
+    default: ""
+  create:
+    description: Create the app if it does not exist yet ("true"/"false").
+    required: false
+    default: "true"
+  api-url:
+    description: Volly API origin (set to https://app.volly.tools for staging).
+    required: false
+    default: "https://app.volly.so"
+  cli-version:
+    description: "@volly-app/cli version to run (an npm dist-tag or exact version)."
+    required: false
+    default: "latest"
+
+outputs:
+  url:
+    description: Where the deploy serves (the draft preview URL for drafts).
+    value: ${{ steps.deploy.outputs.url }}
+  deployment-id:
+    description: The created deployment's id.
+    value: ${{ steps.deploy.outputs.deployment-id }}
+  draft:
+    description: Whether the deploy was saved as a draft ("true"/"false").
+    value: ${{ steps.deploy.outputs.draft }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 22
+
+    - id: deploy
+      shell: bash
+      env:
+        VOLLY_TOKEN: ${{ inputs.token }}
+        VOLLY_API_URL: ${{ inputs.api-url }}
+        DEPLOY_PATH: ${{ inputs.path }}
+        DEPLOY_APP: ${{ inputs.app }}
+        DEPLOY_DRAFT: ${{ inputs.draft }}
+        DEPLOY_MESSAGE: ${{ inputs.message }}
+        DEPLOY_CREATE: ${{ inputs.create }}
+        CLI_VERSION: ${{ inputs.cli-version }}
+      run: |
+        set -euo pipefail
+
+        args=(deploy "$DEPLOY_PATH" --yes --json)
+        [ -n "$DEPLOY_APP" ] && args+=(--app "$DEPLOY_APP")
+        [ "$DEPLOY_DRAFT" = "true" ] && args+=(--draft)
+        [ -n "$DEPLOY_MESSAGE" ] && args+=(--message "$DEPLOY_MESSAGE")
+        [ "$DEPLOY_CREATE" = "true" ] && args+=(--create)
+
+        # VOLLY_CLI_BIN is a test seam (this repo's CI runs the local build);
+        # consumers always get the published package via npx.
+        result="$(${VOLLY_CLI_BIN:-npx --yes @volly-app/cli@"$CLI_VERSION"} "${args[@]}")"
+        echo "$result"
+
+        # --json prints exactly the API's deploy response on stdout.
+        node -e '
+          const result = JSON.parse(process.argv[1]);
+          const fs = require("node:fs");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, [
+            `url=${result.url}`,
+            `deployment-id=${result.deploymentId}`,
+            `draft=${result.draft}`,
+            "",
+          ].join("\n"));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            result.draft
+              ? `### Volly draft staged\n\nPreview: ${result.url}\n`
+              : `### Deployed to Volly\n\nLive: ${result.url}\n`);
+        ' "$result"
