@@ -20,6 +20,9 @@
     "README.md"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/bin.ts",
