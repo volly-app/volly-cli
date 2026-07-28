@@ -1,8 +1,5 @@
 name: Deploy to Volly
-description: >-
-  Deploy a static site to Volly. Wraps the @volly-app/cli npm package:
-  packs a directory (or single file), creates the app if needed, and
-  publishes it — or stages a draft build for review.
+description: Deploy a static site to Volly with @volly-app/cli. Pack, publish live, or stage a draft build for review.
 author: volly-app
 branding:
   icon: upload-cloud
