@@ -2,10 +2,16 @@ import { Command, Option } from "clipanion";
 import { statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
+import type { Client, DeployJob } from "../lib/api.js";
+
 import { findProject, saveProject } from "../lib/config.js";
 import { CliUsageError, isNotFound } from "../lib/errors.js";
 import { build } from "../lib/pack.js";
 import { VollyCommand } from "./base.js";
+
+/** Deploys poll their job to a terminal state (like the dashboard). */
+const DEPLOY_POLL_INTERVAL_MS = 1500;
+const DEPLOY_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 export class DeployCommand extends VollyCommand {
   static paths = [[`deploy`]];
@@ -39,6 +45,9 @@ export class DeployCommand extends VollyCommand {
   });
   yes = Option.Boolean("--yes", false, {
     description: "answer yes to all prompts (CI)",
+  });
+  noWait = Option.Boolean("--no-wait", false, {
+    description: "trigger the deploy and return immediately (prints the job id)",
   });
   // Named `target`, not `path` — Command already owns a `path` property.
   target = Option.String({ required: false });
@@ -93,7 +102,7 @@ export class DeployCommand extends VollyCommand {
     const bundle = build(target);
 
     this.log(`Deploying ${bundle.fileCount} file(s) to ${slug}…`);
-    const { data: result, raw } = await client.deploy(
+    const { data: trigger, raw: triggerRaw } = await client.deploy(
       org,
       slug,
       bundle.filename,
@@ -101,15 +110,58 @@ export class DeployCommand extends VollyCommand {
       this.message ?? "",
       this.draft,
     );
-    if (this.json) {
-      this.printJson(raw);
+
+    // --no-wait: fire and return the job id for advanced/async callers.
+    if (this.noWait) {
+      if (this.json) {
+        this.printJson(triggerRaw);
+        return;
+      }
+      this.out(`Deploy started for ${slug} (job ${trigger.jobId}) → ${trigger.url}`);
+      this.log(`It will finish in the background; re-run without --no-wait to watch it.`);
       return;
     }
-    if (result.draft) {
-      this.out(`Draft saved for ${slug} → ${result.url}`);
-      this.log(`Publish it with 'volly draft publish --app ${slug}'`);
-    } else {
-      this.out(`Deployed ${slug} → ${result.url}`);
+
+    // Block until the deploy reaches a terminal state, preserving the CI
+    // contract: exit 0 once live, non-zero on failure.
+    this.log(`Waiting for the deploy to finish…`);
+    const job = await this.pollDeploy(client, org, slug, trigger.jobId);
+    if (this.json) {
+      this.printJson(JSON.stringify(job));
+    }
+    if (job.status === "failed") {
+      throw new Error(`Deploy failed: ${job.error ?? "unknown error"}`);
+    }
+    if (!this.json) {
+      if (job.draft) {
+        this.out(`Draft saved for ${slug} → ${job.url}`);
+        this.log(`Publish it with 'volly draft publish --app ${slug}'`);
+      } else {
+        this.out(`Deployed ${slug} → ${job.url}`);
+      }
+      for (const warning of job.warnings) {
+        this.log(`warning: ${warning.title} — ${warning.summary}`);
+      }
+    }
+  }
+
+  /** Poll a deploy job to a terminal state (ready/failed), or time out. */
+  private async pollDeploy(
+    client: Client,
+    org: string,
+    slug: string,
+    jobId: string,
+  ): Promise<DeployJob> {
+    const deadline = Date.now() + DEPLOY_POLL_TIMEOUT_MS;
+    for (;;) {
+      const { data } = await client.getDeployJob(org, slug, jobId);
+      if (data.status === "ready" || data.status === "failed") return data;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Deploy is still running after ${DEPLOY_POLL_TIMEOUT_MS / 60000} minutes (job ${jobId}). Check back later.`,
+        );
+      }
+      await new Promise((resolveTimer) => setTimeout(resolveTimer, DEPLOY_POLL_INTERVAL_MS));
     }
   }
 

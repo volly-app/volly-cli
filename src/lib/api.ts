@@ -47,12 +47,34 @@ export interface CreatedApp {
   url: string;
 }
 
-export interface DeployResult {
-  url: string;
+export type DeployJobStatus = "queued" | "validating" | "uploading" | "ready" | "failed";
+
+/** A non-fatal deploy warning (e.g. a Claude host-runtime dependency). */
+export interface DeployWarning {
+  kind: string;
+  title: string;
+  summary: string;
+  fixPrompt?: string;
+}
+
+/** 202 response from triggering a deploy — a job id to poll, not the finished build. */
+export interface DeployTrigger {
+  jobId: string;
   deploymentId: string;
-  fileCount: number;
-  totalBytes: number;
+  status: DeployJobStatus;
+  url: string;
   draft: boolean;
+}
+
+/** Poll result for an async deploy job. */
+export interface DeployJob {
+  jobId: string;
+  status: DeployJobStatus;
+  draft: boolean;
+  warnings: DeployWarning[];
+  error: string | null;
+  deploymentId: string | null;
+  url: string;
 }
 
 export interface PromoteResult {
@@ -93,7 +115,10 @@ export interface TokenSummary {
   revoked_at: string | null;
 }
 
-type RequestBody = string | FormData;
+// Request bodies are always JSON now. The one binary upload (the deploy bundle)
+// PUTs its bytes straight to storage via the presigned/capability URL, outside
+// this bearer-authed request path.
+type RequestBody = string;
 
 /** A decoded response plus its raw JSON text (the --json contract). */
 export interface WithRaw<T> {
@@ -156,9 +181,8 @@ export class Client {
       Authorization: `Bearer ${this.token}`,
       "User-Agent": this.userAgent,
     };
-    let payload: RequestBody | undefined;
-    if (body) payload = body();
-    if (typeof payload === "string") headers["Content-Type"] = "application/json";
+    const payload = body?.();
+    if (payload !== undefined) headers["Content-Type"] = "application/json";
     return this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers,
@@ -222,27 +246,44 @@ export class Client {
     );
   }
 
-  /** Multipart deploy. Content is a buffer so the body can be rebuilt if the
-   *  request retries after a token refresh. */
-  deploy(
+  /**
+   * Start an async deploy: request an upload URL, PUT the bundle straight to
+   * storage, then trigger the deploy. Returns the trigger response (a job id to
+   * poll via `getDeployJob`) — the build validates and publishes in a background
+   * Workflow. The two authed JSON calls keep their retry-on-401 body thunks; the
+   * PUT itself is authorized by the upload URL, not the bearer token.
+   */
+  async deploy(
     org: string,
     app: string,
     filename: string,
     content: Uint8Array,
     message: string,
     draft: boolean,
-  ): Promise<WithRaw<DeployResult>> {
-    const body = () => {
-      const form = new FormData();
-      form.set("file", new Blob([content as Uint8Array<ArrayBuffer>]), filename);
-      if (message) form.set("message", message);
-      form.set("draft", String(draft));
-      return form;
-    };
-    return this.json<DeployResult>(
+  ): Promise<WithRaw<DeployTrigger>> {
+    const base = `/api/orgs/${encodeURIComponent(org)}/apps/${encodeURIComponent(app)}`;
+    const { data: upload } = await this.json<{ uploadId: string; uploadUrl: string }>(
       "POST",
-      `/api/orgs/${encodeURIComponent(org)}/apps/${encodeURIComponent(app)}/deploy`,
-      body,
+      `${base}/deploy-uploads`,
+      () => JSON.stringify({ filename }),
+    );
+    const put = await this.fetchImpl(upload.uploadUrl, {
+      method: "PUT",
+      body: content as Uint8Array<ArrayBuffer>,
+    });
+    if (!put.ok) {
+      throw new ApiError(put.status, "upload failed", put.headers.get("Retry-After"));
+    }
+    return this.json<DeployTrigger>("POST", `${base}/deploy`, () =>
+      JSON.stringify({ uploadId: upload.uploadId, message: message || undefined, draft }),
+    );
+  }
+
+  /** Poll a deploy job's status (the async deploy's completion signal). */
+  getDeployJob(org: string, app: string, jobId: string): Promise<WithRaw<DeployJob>> {
+    return this.json<DeployJob>(
+      "GET",
+      `/api/orgs/${encodeURIComponent(org)}/apps/${encodeURIComponent(app)}/deploy-jobs/${encodeURIComponent(jobId)}`,
     );
   }
 

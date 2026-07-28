@@ -104,28 +104,35 @@ describe("refresh", () => {
 });
 
 describe("deploy", () => {
-  it("posts a rebuilt multipart body with file, message, and draft fields", async () => {
+  it("requests an upload URL, PUTs the bytes, then triggers the deploy", async () => {
+    // Record every request; assert after the call so no expect() runs
+    // conditionally inside the server handler.
+    const seen: string[] = [];
+    const bodies: Record<string, string> = {};
+    let putMethod = "";
     const client = await testClient((req, res, body) => {
-      expect(req.url).toBe("/api/orgs/acme/apps/site/deploy");
-      const text = body.toString("latin1");
-      expect(req.headers["content-type"]).toContain("multipart/form-data");
-      expect(text).toContain('name="file"');
-      expect(text).toContain("zip-bytes");
-      expect(text).toContain('name="message"');
-      expect(text).toContain("hello");
-      expect(text).toContain('name="draft"');
-      expect(text).toContain("true");
-      res.end(
-        JSON.stringify({
-          url: "https://acme-site.volly.so",
-          deploymentId: "d1",
-          fileCount: 3,
-          totalBytes: 9,
-          draft: true,
-        }),
-      );
+      const key = req.url ?? "";
+      seen.push(`${req.method} ${key}`);
+      bodies[key] = body.toString();
+      if (key.endsWith("/deploy-uploads")) {
+        // The upload URL points back at this test server (stands in for R2).
+        res.end(JSON.stringify({ uploadId: "up-1", uploadUrl: `${baseUrl}/put-here` }));
+      } else if (key === "/put-here") {
+        putMethod = req.method ?? "";
+        res.end("");
+      } else {
+        res.end(
+          JSON.stringify({
+            jobId: "job-1",
+            deploymentId: "d1",
+            status: "queued",
+            url: "https://acme-site.volly.so",
+            draft: true,
+          }),
+        );
+      }
     });
-    const { data: result } = await client.deploy(
+    const { data: trigger } = await client.deploy(
       "acme",
       "site",
       "bundle.zip",
@@ -133,8 +140,45 @@ describe("deploy", () => {
       "hello",
       true,
     );
-    expect(result.url).toBe("https://acme-site.volly.so");
-    expect(result.draft).toBe(true);
+    // The bytes went straight to storage (raw PUT, no multipart wrapper).
+    expect(putMethod).toBe("PUT");
+    expect(bodies["/put-here"]).toBe("zip-bytes");
+    expect(JSON.parse(bodies["/api/orgs/acme/apps/site/deploy-uploads"] ?? "{}").filename).toBe(
+      "bundle.zip",
+    );
+    expect(JSON.parse(bodies["/api/orgs/acme/apps/site/deploy"] ?? "{}")).toMatchObject({
+      uploadId: "up-1",
+      message: "hello",
+      draft: true,
+    });
+    expect(trigger.jobId).toBe("job-1");
+    expect(trigger.url).toBe("https://acme-site.volly.so");
+    expect(trigger.draft).toBe(true);
+    expect(seen).toEqual([
+      "POST /api/orgs/acme/apps/site/deploy-uploads",
+      "PUT /put-here",
+      "POST /api/orgs/acme/apps/site/deploy",
+    ]);
+  });
+
+  it("reads a deploy job's status", async () => {
+    const client = await testClient((req, res) => {
+      expect(req.url).toBe("/api/orgs/acme/apps/site/deploy-jobs/job-1");
+      res.end(
+        JSON.stringify({
+          jobId: "job-1",
+          status: "ready",
+          draft: false,
+          warnings: [],
+          error: null,
+          deploymentId: "d1",
+          url: "https://acme-site.volly.so",
+        }),
+      );
+    });
+    const { data } = await client.getDeployJob("acme", "site", "job-1");
+    expect(data.status).toBe("ready");
+    expect(data.url).toBe("https://acme-site.volly.so");
   });
 });
 

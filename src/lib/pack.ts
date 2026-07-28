@@ -12,8 +12,7 @@ import { zipSync } from "fflate";
 export const MAX_UNCOMPRESSED_BYTES = 150 * 1024 * 1024;
 
 export interface Bundle {
-  /** Filename sent in the multipart part; its extension drives the server's
-   *  extraction path (.zip vs bare file). */
+  /** Upload filename staged with the deploy. */
   filename: string;
   content: Uint8Array;
   /** Informational (1 for a bare file). */
@@ -22,11 +21,28 @@ export interface Bundle {
 
 const SINGLE_FILE_EXTS = new Set([".html", ".zip", ".jsx", ".tsx"]);
 
+/**
+ * Coerce a filename into one the deploy-uploads route accepts: keep the real
+ * (already-validated) extension, slugify the stem, and fall back to "bundle"
+ * when nothing safe survives. Only the extension matters server-side.
+ */
+export function safeUploadName(name: string): string {
+  const ext = extname(name).toLowerCase();
+  const stem = basename(name, extname(name))
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/^[^a-zA-Z0-9]+/, "");
+  return `${stem || "bundle"}${ext}`;
+}
+
 /** Entries that never enter a bundle: VCS state, dependencies, the project
  *  config itself, and OS noise. */
 function skipped(name: string): boolean {
   return (
-    name.startsWith(".") || name === "node_modules" || name === "volly.json" || name === "Thumbs.db"
+    name.startsWith(".") ||
+    name === ".DS_Store" ||
+    name === "node_modules" ||
+    name === "volly.json" ||
+    name === "Thumbs.db"
   );
 }
 
@@ -46,7 +62,7 @@ export function build(path: string): Bundle {
       );
     }
     return {
-      filename: basename(path),
+      filename: safeUploadName(basename(path)),
       content: readFileSync(path),
       fileCount: 1,
     };

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { build } from "./pack.js";
+import { build, safeUploadName } from "./pack.js";
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "volly-pack-"));
@@ -55,5 +55,31 @@ describe("single files", () => {
     const path = join(dir, "notes.md");
     writeFile(path, "# nope");
     expect(() => build(path)).toThrow(/unsupported file type/);
+  });
+
+  it("sanitizes an unsafe filename so deploy-uploads accepts it", () => {
+    const dir = tempDir();
+    const path = join(dir, "My Résumé.html");
+    writeFile(path, "<h1>hi</h1>");
+    const bundle = build(path);
+    // Real extension kept, stem slugified — the server only dispatches on the ext.
+    expect(bundle.filename).toBe("My-R-sum-.html");
+    expect(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(bundle.filename)).toBe(true);
+    expect(Buffer.from(bundle.content).toString()).toBe("<h1>hi</h1>");
+  });
+});
+
+describe("safeUploadName", () => {
+  it("keeps an already-safe name unchanged", () => {
+    expect(safeUploadName("bundle.zip")).toBe("bundle.zip");
+    expect(safeUploadName("app.tsx")).toBe("app.tsx");
+  });
+
+  it("slugifies unsafe characters and lowercases the extension", () => {
+    expect(safeUploadName("My Résumé.HTML")).toBe("My-R-sum-.html");
+  });
+
+  it("falls back to 'bundle' when the stem has nothing safe to keep", () => {
+    expect(safeUploadName("™.jsx")).toBe("bundle.jsx");
   });
 });

@@ -22,7 +22,7 @@ Requires Node.js 20+.
 ```text
 volly login [--with-token] [--no-browser]   Sign in (browser OAuth, or paste a token)
 volly logout | whoami
-volly deploy [path] [--app SLUG] [--draft] [-m MSG] [--create] [--yes]
+volly deploy [path] [--app SLUG] [--draft] [-m MSG] [--create] [--yes] [--no-wait]
 volly app    list | create SLUG | get SLUG | delete SLUG
 volly draft  publish | discard       [--app SLUG]
 volly deployments list               [--app SLUG] [--limit N]
@@ -49,6 +49,11 @@ The file is written for you the first time you deploy with `--create`.
 
 Use `--draft` to stage a build on a private preview URL without touching the
 live site, then `volly draft publish` to ship it (or `volly draft discard`).
+
+Deploys run as a background job: `volly deploy` triggers it and then polls until
+the build is live (exit 0) or fails (exit non-zero) — so it stays drop-in for
+CI. Pass `--no-wait` to return as soon as the deploy is queued, printing the job
+id and eventual URL instead of waiting.
 
 ## GitHub Action
 
