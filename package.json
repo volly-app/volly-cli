@@ -1,6 +1,6 @@
 {
   "name": "@volly-app/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deploy and manage Volly apps from the terminal",
   "keywords": [
     "cli",
