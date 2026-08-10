@@ -4,7 +4,18 @@
  * (volly_pat_…) or an OAuth access JWT. Token refresh is the caller's
  * concern: pass a `refresh` hook and the client retries one time after a 401.
  */
+import type { DeployJob, DeployTrigger } from "./deploy-contract.vendored.js";
+
 import { ApiError } from "./errors.js";
+
+// The deploy wire types (DeployJobStatus/DeployWarning/DeployTrigger/DeployJob)
+// come from the vendored deploy contract — the same source the server compiles.
+export type {
+  DeployJob,
+  DeployJobStatus,
+  DeployTrigger,
+  DeployWarning,
+} from "./deploy-contract.vendored.js";
 
 // ---- Response shapes (mirroring the API's zod schemas) ----
 
@@ -44,36 +55,6 @@ export interface App {
 export interface CreatedApp {
   slug: string;
   name: string;
-  url: string;
-}
-
-export type DeployJobStatus = "queued" | "validating" | "uploading" | "ready" | "failed";
-
-/** A non-fatal deploy warning (e.g. a Claude host-runtime dependency). */
-export interface DeployWarning {
-  kind: string;
-  title: string;
-  summary: string;
-  fixPrompt?: string;
-}
-
-/** 202 response from triggering a deploy — a job id to poll, not the finished build. */
-export interface DeployTrigger {
-  jobId: string;
-  deploymentId: string;
-  status: DeployJobStatus;
-  url: string;
-  draft: boolean;
-}
-
-/** Poll result for an async deploy job. */
-export interface DeployJob {
-  jobId: string;
-  status: DeployJobStatus;
-  draft: boolean;
-  warnings: DeployWarning[];
-  error: string | null;
-  deploymentId: string | null;
   url: string;
 }
 

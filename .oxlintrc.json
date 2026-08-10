@@ -8,5 +8,5 @@
   "env": {
     "node": true
   },
-  "ignorePatterns": ["dist", "node_modules"]
+  "ignorePatterns": ["dist", "node_modules", "src/lib/deploy-contract.vendored.ts"]
 }
