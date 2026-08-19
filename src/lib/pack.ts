@@ -7,9 +7,11 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { zipSync } from "fflate";
 
-/** Mirrors the server's MAX_ZIP_UNCOMPRESSED_BYTES so oversized bundles fail
+import { MAX_ZIP_UNCOMPRESSED_BYTES, ROOT_INDEX_FILE } from "./deploy-contract.vendored.js";
+
+/** The server's zip limit (vendored deploy contract) so oversized bundles fail
  *  fast client-side (the server stays authoritative). */
-export const MAX_UNCOMPRESSED_BYTES = 150 * 1024 * 1024;
+export const MAX_UNCOMPRESSED_BYTES = MAX_ZIP_UNCOMPRESSED_BYTES;
 
 export interface Bundle {
   /** Upload filename staged with the deploy. */
@@ -73,7 +75,7 @@ export function build(path: string): Bundle {
 
 function buildDir(dir: string): Bundle {
   try {
-    statSync(join(dir, "index.html"));
+    statSync(join(dir, ROOT_INDEX_FILE));
   } catch {
     throw new Error(
       `${dir} has no index.html at its root — every deployed site needs one as its entry point`,
