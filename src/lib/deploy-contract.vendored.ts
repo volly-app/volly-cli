@@ -1,4 +1,4 @@
-// GENERATED from volly-app packages/deploy-contract — do not edit; run infra/scripts/sync-cli-contract.sh
+// GENERATED from volly-app packages/deploy-contract (sha256:22a9edb227b19e892e5e0dd6ab270f2d3245c60ea07becf72cd30f002adc1b09) — do not edit; run infra/scripts/sync-cli-contract.sh
 /**
  * The deploy contract: the one vocabulary every deploy surface shares — the
  * api worker writes builds under it, the serve worker reads them back, and the
